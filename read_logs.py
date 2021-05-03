@@ -4,7 +4,7 @@ import sys
 import glob
 import json
 
-import init_logger
+from pathlib import Path
 from datetime import datetime
 from argparse import ArgumentParser
 
@@ -15,7 +15,8 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
-logger = init_logger.setup_logger()
+import init_logger
+logger = init_logger.setup_logger('log-eval.log')
 
 def match_format_string(format_str, s):
     '''
@@ -79,9 +80,10 @@ class Logs:
             self.dataset = mspath[1].split('_')[0]
 
         if 'cal' in card:
-            mspath = glob.glob(os.path.join(card,'*.ms'))[0].rsplit('/',1)
-            self.card_name = card.split('/')[-1]
-            self.output_path = os.path.join(mspath[0],'output')
+            card_split = card.rsplit('/',1)
+            mspath = glob.glob(os.path.join(card_split[0],'*.ms'))[0].rsplit('/',1)
+            self.card_name = card_split[1]
+            self.output_path = os.path.join(card,'output')
             self.dataset = mspath[1].split('.')[0]
 
         if 'cube' in card:
@@ -119,7 +121,7 @@ class Logs:
 
         # Parse task from filename
         self.casa_log['task'] = [os.path.basename(file).split('_')[2] for file in self.casa_log['file']]
-        self.casa_error['task'] = [os.path.basename(file).split('_')[2] for file in self.casa_log['file']]
+        self.casa_error['task'] = [os.path.basename(file).split('_')[2] for file in self.casa_error['file']]
 
         # If no logs found, go back
         if len(self.casa_log) == 0 and len(self.casa_error) == 0:
@@ -225,7 +227,9 @@ class Logs:
         Match found errors to a dictionary of known errors and return the unknown errors
         '''
         logger.info('Comparing errors found to known errors')
-        with open('input/known_errors.json') as f:
+
+        path = Path(__file__).parent / 'input/known_errors.json'
+        with open(path) as f:
             template_dict = json.load(f)
 
         severe_template = template_dict[self.software_version]['SEVERE']
@@ -327,6 +331,9 @@ class Logs:
             json.dump(data, f, indent=4)
 
     def check_flags(self):
+        '''
+        Check flagged data during self calibration stages
+        '''
         selfcal_log = self.casa_log[self.casa_log['task'] == 'ContinuumImagingCont']['file']
         flag_format = '   G Jones: In: {in_flag} / {in_tot}   ({in_percent}%) --> Out: {out_flag} / {out_tot}   ({out_percent}%) ({caltable})'
 
@@ -346,6 +353,25 @@ class Logs:
 
         logger.info('Percent of flagged data at the end of self-calibration: {0:.2f}%'.format(out_flag))
 
+    def get_rms(self):
+        '''
+        Get theoretical sensitivity from the CASA log
+        '''
+        imaging_log = self.casa_log[self.casa_log['task'] == 'Imaging']['file']
+        sensitivity_format = '[{image}][Taylor0] Theoretical sensitivity (Jy/bm):{sensitivity}'
+
+        imaging_lines = parse_file(imaging_log[0])
+
+        for line in imaging_lines:
+            if 'task_tclean::SIImageStoreMultiTerm::calcSensitivity \t[' in line:
+                clip_line = line.split('\t')[-1]
+                sensitivity = match_format_string(sensitivity_format, clip_line)
+                break
+
+        theo_sens = sensitivity['sensitivity']
+        logger.info('Theoretical sensitivity calculated as {0} Jy/beam'.format(theo_sens))
+        return theo_sens
+
 def main():
 
     parser = new_argument_parser()
@@ -355,14 +381,16 @@ def main():
     experiment = args.experiment
     selection = args.selection
 
-    experiment_path = os.path.join(dataset_path,'experiment_'+str(experiment),'*')
+    experiment_path = os.path.join(dataset_path,'experiment_'+str(experiment),'*artip_*')
 
     split = experiment_path.split('/')
     output_folder = split[-3]+'_'+split[-2]+'_logs_output/'
     if not os.path.exists(output_folder):
         os.mkdir(output_folder)
 
-    artip_cards = sorted(glob.glob(experiment_path))
+    # Find cards and sort them in a sensible order
+    artip_cards = sorted(glob.glob(experiment_path),
+                         key=lambda experiment_path: '_'.join(experiment_path.rsplit('_',2)[1:]))
 
     if not artip_cards:
         logger.warn('No ARTIP blocks found, please check path carefully')
@@ -379,20 +407,24 @@ def main():
         if indexed:
             logs.read_errors()
             warn, severe = logs.match_errors()
-            if 'cal' in card:
+            if 'artip_cal' in card:
                 logs.check_fluxmodel()
-            if 'cont' in card:
+            if 'artip_cont' in card and logs.casa_log[logs.casa_log['task'] == 'ContinuumImagingCont']:
                 logs.check_flags()
+                theoretical_sensitivity = logs.get_rms()
 
             if warn or severe or logs.artip_errors:
                 logs.write_errors(warn, severe)
-                logs.visualize_errors()
+                #logs.visualize_errors()
                 logger.important('Possibly important errors have been found and have been written')
                 logger.important('to the output folder '+logs.output+', please check the files.')
                 logger.important('If the errors are harmless, consider adding them to the known_errors')
                 logger.important('file so that they will not be considered important in the future.')
             else:
                 logger.info('No relevant errors found, no output file written')
+
+    logger.handlers.clear()
+    os.rename('log-eval.log', os.path.join(output_folder,'log-eval.log'))
 
 
 def new_argument_parser():
