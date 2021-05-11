@@ -16,7 +16,8 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 import init_logger
-logger = init_logger.setup_logger()
+import rms_map
+logger = init_logger.setup_logger('log-eval.log')
 
 def match_format_string(format_str, s):
     '''
@@ -331,6 +332,9 @@ class Logs:
             json.dump(data, f, indent=4)
 
     def check_flags(self):
+        '''
+        Check flagged data during self calibration stages
+        '''
         selfcal_log = self.casa_log[self.casa_log['task'] == 'ContinuumImagingCont']['file']
         flag_format = '   G Jones: In: {in_flag} / {in_tot}   ({in_percent}%) --> Out: {out_flag} / {out_tot}   ({out_percent}%) ({caltable})'
 
@@ -349,6 +353,25 @@ class Logs:
                     logger.important('Associated caltable: '+flag_info['caltable'])
 
         logger.info('Percent of flagged data at the end of self-calibration: {0:.2f}%'.format(out_flag))
+
+    def get_rms(self):
+        '''
+        Get theoretical sensitivity from the CASA log
+        '''
+        imaging_log = self.casa_log[self.casa_log['task'] == 'Imaging']['file']
+        sensitivity_format = '[{image}][Taylor0] Theoretical sensitivity (Jy/bm):{sensitivity}'
+
+        imaging_lines = parse_file(imaging_log[0])
+
+        for line in imaging_lines:
+            if 'task_tclean::SIImageStoreMultiTerm::calcSensitivity \t[' in line:
+                clip_line = line.split('\t')[-1]
+                sensitivity = match_format_string(sensitivity_format, clip_line)
+                break
+
+        theo_sens = sensitivity['sensitivity']
+        logger.info('Theoretical sensitivity calculated as {0} Jy/beam'.format(theo_sens))
+        return theo_sens
 
 def main():
 
@@ -389,16 +412,23 @@ def main():
                 logs.check_fluxmodel()
             if 'artip_cont' in card and logs.casa_log[logs.casa_log['task'] == 'ContinuumImagingCont']:
                 logs.check_flags()
+                theoretical_sensitivity = logs.get_rms()
+                rms_map.plot_rms_steps(os.path.join(logs.output_path,logs.dataset), 
+                                       theoretical_sensitivity,
+                                       output_folder)
 
             if warn or severe or logs.artip_errors:
                 logs.write_errors(warn, severe)
-                logs.visualize_errors()
+                #logs.visualize_errors()
                 logger.important('Possibly important errors have been found and have been written')
                 logger.important('to the output folder '+logs.output+', please check the files.')
                 logger.important('If the errors are harmless, consider adding them to the known_errors')
                 logger.important('file so that they will not be considered important in the future.')
             else:
                 logger.info('No relevant errors found, no output file written')
+
+    logger.handlers.clear()
+    os.rename('log-eval.log', os.path.join(output_folder,'log-eval.log'))
 
 
 def new_argument_parser():

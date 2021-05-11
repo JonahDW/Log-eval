@@ -9,5 +9,15 @@
             "MSTransformManager::setup\tThere is only one selected SPW, no need to combine"],
         "SEVERE" : [
             "MeasTable::dUTC(Double)"]
+    },
+    "CASA Version  5.7.2-4": {
+        "WARN" : [
+            "flagmanager::::\tVersion name '.*' already exist",
+            "task_tclean::SIImageStore::restore (file ../../synthesis/ImagerObjects/SIImageStore.cc, line 2068)\tRestoring with an empty model image. Only residuals will be processed to form the output restored image.",
+            "task_tclean::ImageRegridder::_doImagesOverlap\tAt least one of the images exceeds one degree on at one side, not checking for direction plane overlap.",
+            "tclean::task_tclean::\tPlease check the casa log file for a message confirming that the model was saved after the last major cycle. If it doesn't exist, please re-run tclean with niter=0,calcres=False,calcpsf=False in order to trigger a 'predict model' step that obeys the savemodel parameter.",
+            "FlagDataHandler::preLoadColumn (file ../../flagging/Flagging/FlagDataHandler.cc, line 969)\tPROCESSOR sub-table is empty. Assuming CORRELATOR type.",
+            "MSTransformManager::setup\tThere is only one selected SPW, no need to combine"],
+        "SEVERE" : []
     }
 }
