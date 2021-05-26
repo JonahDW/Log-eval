@@ -16,6 +16,8 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 import init_logger
+import rms_map
+
 logger = init_logger.setup_logger('log-eval.log')
 
 def match_format_string(format_str, s):
@@ -149,7 +151,10 @@ class Logs:
 
         # Retrieve software version
         logfile = parse_file(self.casa_log['file'][0])
-        self.software_version = logfile[1].split('\t')[-1].strip()
+        for line in logfile:
+            if 'CASA Version' in line:
+                self.software_version = line.split('\t')[-1].strip()
+                break
 
         return True
 
@@ -412,6 +417,11 @@ def main():
             if 'artip_cont' in card and logs.casa_log[logs.casa_log['task'] == 'ContinuumImagingCont']:
                 logs.check_flags()
                 theoretical_sensitivity = logs.get_rms()
+
+                rms_map.plot_rms_steps(os.path.join(logs.output_path,logs.dataset),
+                                       theoretical_sensitivity,
+                                       output_folder)
+
 
             if warn or severe or logs.artip_errors:
                 logs.write_errors(warn, severe)
