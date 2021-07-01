@@ -14,7 +14,7 @@ def setup_logger(filename):
     logger.setLevel(logging.DEBUG)
 
     # Create file handler
-    log_file_handler = logging.FileHandler(filename)
+    log_file_handler = logging.FileHandler(filename, 'w+')
     log_file_handler.setLevel(logging.DEBUG)
 
     # Create console handler

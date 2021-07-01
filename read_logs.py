@@ -82,14 +82,15 @@ class Logs:
             self.dataset = mspath[1].split('_')[0]
 
         if 'cal' in card:
-            card_split = card.rsplit('/',1)
+            card_split = card.rsplit('/',2)
             mspath = glob.glob(os.path.join(card_split[0],'*.ms'))[0].rsplit('/',1)
-            self.card_name = card_split[1]
+            self.card_name = card_split[2]
             self.output_path = os.path.join(card,'output')
             self.dataset = mspath[1].split('.')[0]
 
         if 'cube' in card:
             logger.error('Functionality for this card is not yet implemented')
+            self.card_name = None
 
         # Initialize data structures
         self.casa_log = Table()
@@ -157,6 +158,27 @@ class Logs:
                 break
 
         return True
+
+    def get_processing_time(self):
+        '''
+        Read output file in order to get processing time
+        '''
+        std_out = glob.glob(os.path.join(self.output_path,'std_out_*'))
+
+        out_time = [datetime.strptime(os.path.basename(time).split('_',2)[2].split('.')[0], '%H_%M_%S__%Y_%m_%d')
+                            for time in std_out]
+        sorted_idx = sorted(range(len(out_time)), key=out_time.__getitem__)
+        lines = parse_file(std_out[sorted_idx[0]])
+
+        start_line = re.sub(r'^.*?202', '202', lines[1])
+        end_line = re.sub(r'^.*?202', '202', lines[-2])
+
+        start_time = datetime.strptime(start_line.split('    ')[0], '%Y-%m-%d %H:%M:%S')
+        end_time = datetime.strptime(end_line.split('    ')[0], '%Y-%m-%d %H:%M:%S')
+        diff = end_time - start_time
+
+        time_seconds = diff.total_seconds()
+        logger.info(f'Time taken by pipeline: {int(time_seconds/3600)} hours and {int(time_seconds/60 % 60)} minutes')
 
     def read_errors(self):
         '''
@@ -353,10 +375,10 @@ class Logs:
                 out_flag = float(flag_info['out_percent'])
                 if out_flag - in_flag > 1.5:
                     logger.important('A large amount of data has been flagged during one of the')
-                    logger.important('self calibration stages (from {0:.2f}% to {1:.2f}%)'.format(in_flag, out_flag))
+                    logger.important(f'self calibration stages (from {in_flag:.2f}% to {out_flag:.2f}%)')
                     logger.important('Associated caltable: '+flag_info['caltable'])
 
-        logger.info('Percent of flagged data at the end of self-calibration: {0:.2f}%'.format(out_flag))
+        logger.info(f'Percent of flagged data at the end of self-calibration: {out_flag:.2f}%')
 
     def get_rms(self):
         '''
@@ -374,7 +396,7 @@ class Logs:
                 break
 
         theo_sens = sensitivity['sensitivity']
-        logger.info('Theoretical sensitivity calculated as {0} Jy/beam'.format(theo_sens))
+        logger.info(f'Theoretical sensitivity calculated as {theo_sens} Jy/beam')
         return theo_sens
 
 def main():
@@ -405,6 +427,9 @@ def main():
 
     for card in artip_cards:
         logs = Logs(card, output_folder)
+        if logs.card_name is None:
+            continue
+
         logger.info('------------------'+logs.card_name.upper()+'------------------')
 
         indexed = logs.index_logs(select=selection)
@@ -422,7 +447,7 @@ def main():
                                        theoretical_sensitivity,
                                        output_folder)
 
-
+            logs.get_processing_time()
             if warn or severe or logs.artip_errors:
                 logs.write_errors(warn, severe)
                 #logs.visualize_errors()

@@ -19,6 +19,10 @@ from math import ceil
 from scipy.interpolate import UnivariateSpline
 
 def plot_rms_steps(path, sensitivity, output):
+    '''
+    Get all rms images for different self calibration steps
+    and plot coverage, coverage derivative, dynamic range and rms
+    '''
     field = path.split('/')[-3]
     images, data, sources = get_data(path)
 
@@ -30,6 +34,7 @@ def plot_rms_steps(path, sensitivity, output):
 
     rms_range = np.logspace(min_rms, max_rms, 100)
 
+    # Sort self calibration steps in the correct order
     sorted_steps = sorted(images['type'], key=lambda x: 'b'+x if 'ap' in x else 'a'+x)
     for i, step in enumerate(sorted_steps):
         idx = np.where(images['type'] == step)[0][0]
@@ -54,24 +59,24 @@ def plot_rms_steps(path, sensitivity, output):
         ax[0].fill_between(rms_range, 0, coverage, alpha=0.2)
 
         ax[1].plot(rms_range, data_1d(rms_range), linewidth=1, color=color)
-        ax[2].scatter(i, local_dr, marker='^', color=color)
-        ax[3].plot(i, im_rms, marker='^', color=color)
+        ax[2].scatter(i, local_dr, marker='s', color=color)
+        ax[3].plot(i, im_rms, marker='s', color=color)
 
     ax[0].set_xscale('log')
     ax[0].autoscale(enable=True, axis='x', tight=True)
-    ax[0].set_xlabel('RMS (Jy)')
+    ax[0].set_xlabel('RMS (Jy/beam)')
     ax[0].set_ylabel('Coverage')
     ax[0].set_ylim(bottom=0)
 
     ax[1].set_xscale('log')
     ax[1].autoscale(enable=True, axis='both', tight=True)
-    ax[1].set_xlabel('RMS (Jy)')
+    ax[1].set_xlabel('RMS (Jy/beam)')
     ax[1].set_ylabel('1st derivative of coverage')
     ax[1].set_ylim(bottom=0)
-    ax[1].yaxis.set_major_formatter(mtick.FormatStrFormatter('%.0e'))
+    ax[1].set_yticklabels([])
 
     coords = np.array([c.get_offsets()[0] for c in ax[2].collections])
-    ax[2].plot(coords[:,0],coords[:,1], zorder=0)
+    ax[2].plot(coords[:,0],coords[:,1], zorder=0, color='k', ls='--')
 
     ax[2].set_ylabel('Local dynamic range')
     ax[2].set_xticks(range(len(data)))
@@ -79,11 +84,11 @@ def plot_rms_steps(path, sensitivity, output):
     ax[2].yaxis.set_major_formatter(mtick.FormatStrFormatter('%.1e'))
 
     coords = np.array([l.get_xydata()[0] for l in ax[3].lines])
-    ax[3].plot(coords[:,0],coords[:,1], zorder=0)
-    ax[3].axhline(float(sensitivity), 0, 1, color='k', ls='--', label='Theoretical sensitivity')
+    ax[3].plot(coords[:,0],coords[:,1], zorder=0, color='k', ls='--')
+    ax[3].axhline(float(sensitivity), 0, 1, color='k', label='Theoretical sensitivity')
     ax[3].legend()
 
-    ax[3].set_ylabel('Mean rms')
+    ax[3].set_ylabel('Mean rms (Jy/beam)')
     ax[3].set_xticks(range(len(data)))
     ax[3].set_xticklabels(sorted_steps)
     ax[3].yaxis.set_major_formatter(mtick.FormatStrFormatter('%.1e'))
