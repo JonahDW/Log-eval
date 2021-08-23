@@ -86,7 +86,7 @@ class Logs:
             mspath = glob.glob(os.path.join(card_split[0],'*.ms'))[0].rsplit('/',1)
             self.card_name = card_split[2]
             self.output_path = os.path.join(card,'output')
-            self.dataset = mspath[1].split('.')[0]
+            self.dataset = 'ABSDATA32K'
 
         if 'cube' in card:
             logger.error('Functionality for this card is not yet implemented')
@@ -168,7 +168,7 @@ class Logs:
         out_time = [datetime.strptime(os.path.basename(time).split('_',2)[2].split('.')[0], '%H_%M_%S__%Y_%m_%d')
                             for time in std_out]
         sorted_idx = sorted(range(len(out_time)), key=out_time.__getitem__)
-        lines = parse_file(std_out[sorted_idx[0]])
+        lines = parse_file(std_out[sorted_idx[-1]])
 
         start_line = re.sub(r'^.*?202', '202', lines[1])
         end_line = re.sub(r'^.*?202', '202', lines[-2])
@@ -346,6 +346,15 @@ class Logs:
             if 'fluxscale::::\t Flux density for' in line:
                 clip_line = line.split('\t')[-1]
                 fluxscale.append(match_format_string(getjy_format,clip_line))
+
+        # Match gain calibrator to catalog
+        path = Path(__file__).parent / 'input/Lband-gain-calibrators_HRKJW.csv'
+        cal_cat = Table.read(path)
+        for entry in fluxscale:
+            source = cal_cat[cal_cat['source_name'] == entry['field']]
+            if source:
+                logger.info(f"Gain calibrator {entry['field']} with flux {entry['flux']}+/-{entry['fluxerr']} Jy,")
+                logger.info(f"has been matched to the reference catalog, where the source has flux {source[0]['flux']} Jy.")
 
         # Combine the data in a dictionary and write to a file
         data = {

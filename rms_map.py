@@ -48,7 +48,9 @@ def plot_rms_steps(path, sensitivity, output):
         bright = sources[idx][bright_idx]
         local_dr = np.sum(bright['Peak_flux']/bright['Isl_rms'])
 
-        im_rms = np.median(rms_im)
+        shape = data[idx].shape
+        central_im = data[idx][shape[0]-500:shape[0]+500,shape[1]-500:shape[1]+500]
+        mean_rms = np.mean(central_im)
 
         data_spline = UnivariateSpline(rms_range, coverage, s=0, k=3)
         data_1d = data_spline.derivative(n=1)
@@ -60,7 +62,7 @@ def plot_rms_steps(path, sensitivity, output):
 
         ax[1].plot(rms_range, data_1d(rms_range), linewidth=1, color=color)
         ax[2].scatter(i, local_dr, marker='s', color=color)
-        ax[3].plot(i, im_rms, marker='s', color=color)
+        ax[3].plot(i, mean_rms, marker='s', color=color)
 
     ax[0].set_xscale('log')
     ax[0].autoscale(enable=True, axis='x', tight=True)
@@ -100,7 +102,18 @@ def plot_rms_steps(path, sensitivity, output):
     plt.close()
 
 def get_data(path):
-    images = sorted(glob.glob(os.path.join(path,'*_rms_*.fits')))
+    # Find out which images are even there
+    p_loops = len(glob.glob(os.path.join(path,'self_caled_p','self_cal_image_*.image.tt0')))
+    ap_loops = len(glob.glob(os.path.join(path,'self_caled_ap','self_cal_image_*.image.tt0')))
+
+    images = []
+    images.append(sorted(glob.glob(os.path.join(path,'cont_base_image_rms_*.fits'))))
+    for i in range(1,p_loops+1):
+        images.append(sorted(glob.glob(os.path.join(path,f'self_cal_image_{i}_rms_*_p{i}.fits'))))
+    for i in range(1,ap_loops+1):
+        images.append(sorted(glob.glob(os.path.join(path,f'self_cal_image_{i}_rms_*_ap{i}.fits'))))
+
+    images = [item for sublist in images for item in sublist]
 
     im_index = []
     for im in images:
@@ -124,7 +137,7 @@ def get_data(path):
     sources = []
     for i in images:
         image = fits.open(i['imfile'])[0].data
-        image_data.append(image.flatten())
+        image_data.append(image)
 
         catalog = Table.read(i['catfile'])
         sources.append(catalog)
