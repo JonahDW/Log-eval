@@ -9,53 +9,22 @@ from datetime import datetime
 from argparse import ArgumentParser
 
 import numpy as np
+from datetime import datetime, timedelta
+
+from astropy import units as u
+from astropy.coordinates import SkyCoord
 from astropy.table import Table, unique
 
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
 
 import init_logger
 import rms_map
+import helpers
 
 logger = init_logger.setup_logger('log-eval.log')
-
-def match_format_string(format_str, s):
-    '''
-    Match s against the given format string, return dict of matches.
-
-    We assume all of the arguments in format string are named keyword arguments (i.e. no {} or
-    {:0.2f}). We also assume that all chars are allowed in each keyword argument, so separators
-    need to be present which aren't present in the keyword arguments (i.e. '{one}{two}' won't work
-    reliably as a format string but '{one}-{two}' will if the hyphen isn't used in {one} or {two}).
-
-    We raise if the format string does not match s.
-    Source: https://stackoverflow.com/questions/10663093/use-python-format-string-in-reverse-for-parsing
-
-    Example:
-    fs = '{test}-{flight}-{go}'
-    s = fs.format('first', 'second', 'third')
-    match_format_string(fs, s) -> {'test': 'first', 'flight': 'second', 'go': 'third'}
-    '''
-
-    # First split on any keyword arguments, note that the names of keyword arguments will be in the
-    # 1st, 3rd, ... positions in this list
-    tokens = re.split(r'\{(.*?)\}', format_str)
-    keywords = tokens[1::2]
-
-    # Now replace keyword arguments with named groups matching them. We also escape between keyword
-    # arguments so we support meta-characters there. Re-join tokens to form our regexp pattern
-    tokens[1::2] = map(u'(?P<{}>.*)'.format, keywords)
-    tokens[0::2] = map(re.escape, tokens[0::2])
-    pattern = ''.join(tokens)
-
-    # Use our pattern to match the given string, raise if it doesn't match
-    matches = re.match(pattern, s)
-    if not matches:
-        raise Exception("Format string did not match")
-
-    # Return a dict with all of our keywords and their values
-    return {x: matches.group(x) for x in keywords}
 
 def parse_file(filename):
     '''
@@ -89,8 +58,8 @@ class Logs:
             self.dataset = 'ABSDATA32K'
 
         if 'cube' in card:
-            logger.error('Functionality for this card is not yet implemented')
-            self.card_name = None
+            self.card_name = card.split('/')[-1]
+            self.output_path = None
 
         # Initialize data structures
         self.casa_log = Table()
@@ -333,10 +302,10 @@ class Logs:
         for line in setjy_lines:
             if 'imager::setjy()\t  J' in line:
                 clip_line = line.split('\t')[-1]
-                setjy.append(match_format_string(setjy_format1,clip_line))
+                setjy.append(helpers.match_format_string(setjy_format1,clip_line))
             if 'imager::setjy()\t     ' in line:
                 clip_line = line.split('\t')[-1]
-                setjy.append(match_format_string(setjy_format2,clip_line))
+                setjy.append(helpers.match_format_string(setjy_format2,clip_line))
 
         # Parse fluxscale files
         fluxscale = []
@@ -345,7 +314,7 @@ class Logs:
         for line in getjy_lines:
             if 'fluxscale::::\t Flux density for' in line:
                 clip_line = line.split('\t')[-1]
-                fluxscale.append(match_format_string(getjy_format,clip_line))
+                fluxscale.append(helpers.match_format_string(getjy_format,clip_line))
 
         # Match gain calibrator to catalog
         path = Path(__file__).parent / 'input/Lband-gain-calibrators_HRKJW.csv'
@@ -378,7 +347,7 @@ class Logs:
         for line in selfcal_lines:
             if 'applycal::::\t   G Jones: In:' in line:
                 clip_line = line.split('\t')[-1]
-                flag_info = match_format_string(flag_format, clip_line)
+                flag_info = helpers.match_format_string(flag_format, clip_line)
 
                 in_flag = float(flag_info['in_percent'])
                 out_flag = float(flag_info['out_percent'])
@@ -401,12 +370,72 @@ class Logs:
         for line in imaging_lines:
             if 'task_tclean::SIImageStoreMultiTerm::calcSensitivity \t[' in line:
                 clip_line = line.split('\t')[-1]
-                sensitivity = match_format_string(sensitivity_format, clip_line)
+                sensitivity = helpers.match_format_string(sensitivity_format, clip_line)
                 break
 
         theo_sens = sensitivity['sensitivity']
         logger.info(f'Theoretical sensitivity calculated as {theo_sens} Jy/beam')
         return theo_sens
+
+    def plot_pa(self):
+        '''
+        Plot range of parallactic angles covered
+        '''
+        listobs_file = os.path.join(self.output_path,self.dataset,'listobs.txt')
+
+        scans_table = helpers.parse_listobs(listobs_file, output='scans')
+        source_table = helpers.parse_listobs(listobs_file, output='fields')
+
+        target_scans = scans_table[scans_table['FieldName'] == self.dataset]
+        target_fields = source_table[source_table['Name'] == self.dataset]
+
+        ra = target_fields[0]['RA']
+        d = target_fields[0]['DEC'].split('.')
+        dec = d[0]+':'+d[1]+':'+d[2]+'.'+d[3]
+
+        target_coords = SkyCoord(ra, dec, unit=(u.hourangle, u.deg), frame='fk5')
+
+        # Loop over and plot PA for each scan
+        total_pa = 0
+        for i, scan in enumerate(target_scans):
+            date = scan['Date']
+            if np.ma.is_masked(date):
+                date = last_date
+            else:
+                last_date = date
+            start_time = datetime.strptime(date+' '+scan['Start_Time'], '%d-%b-%Y %H:%M:%S.%f')
+            end_time = datetime.strptime(date+' '+scan['End_Time'], '%d-%b-%Y %H:%M:%S.%f')
+
+            time_diff = end_time-start_time
+            if time_diff.days < 0:
+                time_diff += timedelta(days=1)
+
+            timerange = (0, time_diff.total_seconds()/3600.)
+            if i == 0:
+                begin_obs = start_time
+            obsdatetime = start_time.isoformat()
+
+            pa, lst, obs_time, altaz = helpers.get_parallactic_angle(target_coords,
+                                                                     obsdatetime,
+                                                                     timerange,
+                                                                     elevationlimit=20)
+            pa_diff = abs(pa[-1] - pa[0])
+            total_pa += min(pa_diff, 360 - pa_diff)
+
+            plt.scatter(obs_time.datetime, pa)
+
+        end_obs = max(obs_time.datetime)
+
+        plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%d-%b %H:%M'))
+        plt.gcf().autofmt_xdate()
+        plt.xlim(begin_obs,end_obs)
+        plt.ylabel('Parallactic angle (degrees)')
+        plt.xlabel('Time')
+
+        plt.savefig(os.path.join(self.output,self.card_name+'_pa.png'))
+
+        logger.info(f'Parallactic angle coverage of source {self.dataset} is a total of {total_pa:.1f} degrees')
+
 
 def main():
 
@@ -436,10 +465,12 @@ def main():
 
     for card in artip_cards:
         logs = Logs(card, output_folder)
-        if logs.card_name is None:
-            continue
 
         logger.info('------------------'+logs.card_name.upper()+'------------------')
+
+        if logs.output_path is None:
+            logger.error('Functionality for this card is not yet implemented')
+            continue
 
         indexed = logs.index_logs(select=selection)
 
@@ -451,6 +482,7 @@ def main():
             if 'artip_cont' in card and logs.casa_log[logs.casa_log['task'] == 'ContinuumImagingCont']:
                 logs.check_flags()
                 theoretical_sensitivity = logs.get_rms()
+                logs.plot_pa()
 
                 rms_map.plot_rms_steps(os.path.join(logs.output_path,logs.dataset),
                                        theoretical_sensitivity,
